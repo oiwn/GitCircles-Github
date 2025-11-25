@@ -44,6 +44,15 @@ pub enum GitCirclesError {
         "Repository {0} exists but appears to be empty. Please create at least one commit with P2PK.pub file."
     )]
     RepoEmpty(String),
+
+    #[error("Appreciation record not found for {0}")]
+    AppreciationNotFound(String),
+
+    #[error("Invalid state transition from {0} to {1}")]
+    InvalidStateTransition(String, String),
+
+    #[error("Appreciation record for {0} is in terminal state {1} and cannot be modified")]
+    AppreciationInTerminalState(String, String),
 }
 
 pub type Result<T> = std::result::Result<T, GitCirclesError>;
@@ -51,6 +60,9 @@ pub type Result<T> = std::result::Result<T, GitCirclesError>;
 pub static WALLET_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^9[1-9A-HJ-NP-Za-km-z]{50,}$").expect("wallet regex must compile")
 });
+
+// Appreciation wait period: 14 days in seconds
+pub const APPRECIATION_WAIT_PERIOD_SECS: i64 = 14 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -197,6 +209,40 @@ pub struct BaseBranchChange {
     pub old_branch: String,
     pub new_branch: String,
     pub changed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppreciationState {
+    Registered,
+    ScheduledForSending,
+    WaitingForWallet,
+    AppreciationStopped,
+    StoppedByAuthor,
+    ProcessedWithoutStop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppreciationRecord {
+    pub repository: String,              // "owner/repo"
+    pub pr_number: u64,
+    pub pr_title: String,
+    pub pr_author: String,
+    pub state: AppreciationState,
+    pub detected_at: DateTime<Utc>,
+    pub scheduled_at: Option<DateTime<Utc>>,
+    pub send_after: Option<DateTime<Utc>>,
+    pub notification_comment_id: Option<u64>,
+    pub stop_comment_id: Option<u64>,
+    pub stopped_by: Option<String>,      // GitHub login
+    pub stopped_at: Option<DateTime<Utc>>,
+    pub wallet_login: Option<String>,    // matches user_wallets key
+    pub wallet_address: Option<String>,
+    pub last_wallet_check_at: Option<DateTime<Utc>>,
+    pub wallet_checks: u32,
+    pub processed_at: Option<DateTime<Utc>>,
+    pub transaction_ref: Option<String>, // filled by Task 05
+    pub last_error: Option<String>,      // diagnostic surface for scheduler
 }
 
 pub fn parse_repo(repo_str: &str) -> Result<(String, String)> {

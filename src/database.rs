@@ -1,8 +1,8 @@
 use chrono::Utc;
 
 use crate::types::{
-    BaseBranchChange, MergedPullRequest, Project, ProjectOwner, Repository, Result,
-    UserWallet, WalletAddress, WalletHistoryEntry, WalletLoginLink,
+    AppreciationRecord, BaseBranchChange, MergedPullRequest, Project, ProjectOwner,
+    Repository, Result, UserWallet, WalletAddress, WalletHistoryEntry, WalletLoginLink,
 };
 
 pub struct Database {
@@ -15,6 +15,7 @@ pub struct Database {
     wallet_index: fjall::PartitionHandle,
     projects: fjall::PartitionHandle,
     project_owners: fjall::PartitionHandle,
+    appreciations: fjall::PartitionHandle,
 }
 
 impl Database {
@@ -51,6 +52,10 @@ impl Database {
             "project_owners",
             fjall::PartitionCreateOptions::default(),
         )?;
+        let appreciations = keyspace.open_partition(
+            "appreciations",
+            fjall::PartitionCreateOptions::default(),
+        )?;
 
         Ok(Self {
             keyspace,
@@ -62,6 +67,7 @@ impl Database {
             wallet_index,
             projects,
             project_owners,
+            appreciations,
         })
     }
 
@@ -403,6 +409,64 @@ impl Database {
 
         all_prs.sort_by(|a, b| b.merged_at.cmp(&a.merged_at));
         Ok(all_prs)
+    }
+
+    // Appreciation methods
+    pub fn upsert_appreciation(
+        &self,
+        appreciation: &AppreciationRecord,
+    ) -> Result<()> {
+        let key = format!(
+            "appreciation:{}:{}",
+            appreciation.repository, appreciation.pr_number
+        );
+        let value = serde_json::to_vec(appreciation)?;
+        self.appreciations.insert(&key, &value)?;
+        self.keyspace.persist(fjall::PersistMode::SyncAll)?;
+        Ok(())
+    }
+
+    pub fn get_appreciation(
+        &self,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<Option<AppreciationRecord>> {
+        let key = format!("appreciation:{}:{}", repo, pr_number);
+        if let Some(value) = self.appreciations.get(&key)?
+            && let Ok(appreciation) = serde_json::from_slice(&value)
+        {
+            Ok(Some(appreciation))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn list_appreciations(&self) -> Result<Vec<AppreciationRecord>> {
+        self.appreciations
+            .prefix("appreciation:".as_bytes())
+            .map(|item| {
+                let (_, value) = item?;
+                let appreciation: AppreciationRecord =
+                    serde_json::from_slice(&value)?;
+                Ok(appreciation)
+            })
+            .collect()
+    }
+
+    pub fn list_appreciations_for_repo(
+        &self,
+        repo: &str,
+    ) -> Result<Vec<AppreciationRecord>> {
+        let prefix = format!("appreciation:{}:", repo);
+        self.appreciations
+            .prefix(prefix.as_bytes())
+            .map(|item| {
+                let (_, value) = item?;
+                let appreciation: AppreciationRecord =
+                    serde_json::from_slice(&value)?;
+                Ok(appreciation)
+            })
+            .collect()
     }
 }
 
