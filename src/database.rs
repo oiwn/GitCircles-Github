@@ -521,7 +521,7 @@ mod tests {
                 login: login.into(),
                 branch: "main".into(),
             },
-            recorded_at: Utc.timestamp(1000, 0),
+            recorded_at: Utc.timestamp_opt(1000, 0).unwrap(),
         };
         let e2 = WalletHistoryEntry {
             login: login.into(),
@@ -531,7 +531,7 @@ mod tests {
                 login: login.into(),
                 branch: "main".into(),
             },
-            recorded_at: Utc.timestamp(1001, 0),
+            recorded_at: Utc.timestamp_opt(1001, 0).unwrap(),
         };
 
         db.append_wallet_history(&e1).unwrap();
@@ -578,8 +578,8 @@ mod tests {
         let platform = "github";
         let address = addr("ZZ");
 
-        let early = Utc.timestamp(2000, 0);
-        let late = Utc.timestamp(3000, 0);
+        let early = Utc.timestamp_opt(2000, 0).unwrap();
+        let late = Utc.timestamp_opt(3000, 0).unwrap();
 
         let mut link = WalletLoginLink {
             wallet: address.clone(),
