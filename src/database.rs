@@ -643,4 +643,199 @@ mod tests {
             1
         );
     }
+
+    #[test]
+    fn appreciation_record_roundtrip() {
+        use crate::types::{AppreciationRecord, AppreciationState};
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path().to_str().unwrap()).unwrap();
+
+        let record = AppreciationRecord {
+            repository: "owner/repo".into(),
+            pr_number: 42,
+            pr_title: "Add new feature".into(),
+            pr_author: "alice".into(),
+            state: AppreciationState::Registered,
+            detected_at: Utc::now(),
+            scheduled_at: None,
+            send_after: None,
+            notification_comment_id: None,
+            stop_comment_id: None,
+            stopped_by: None,
+            stopped_at: None,
+            wallet_login: None,
+            wallet_address: None,
+            last_wallet_check_at: None,
+            wallet_checks: 0,
+            processed_at: None,
+            transaction_ref: None,
+            last_error: None,
+        };
+
+        db.upsert_appreciation(&record).unwrap();
+
+        let fetched = db
+            .get_appreciation("owner/repo", 42)
+            .unwrap()
+            .expect("should exist");
+
+        assert_eq!(fetched.repository, "owner/repo");
+        assert_eq!(fetched.pr_number, 42);
+        assert_eq!(fetched.pr_title, "Add new feature");
+        assert_eq!(fetched.pr_author, "alice");
+        assert_eq!(fetched.state, AppreciationState::Registered);
+        assert_eq!(fetched.wallet_checks, 0);
+    }
+
+    #[test]
+    fn appreciation_repository_scoped_queries() {
+        use crate::types::{AppreciationRecord, AppreciationState};
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path().to_str().unwrap()).unwrap();
+
+        // Create appreciations for two different repos
+        let record1 = AppreciationRecord {
+            repository: "owner/repo1".into(),
+            pr_number: 1,
+            pr_title: "PR 1".into(),
+            pr_author: "alice".into(),
+            state: AppreciationState::Registered,
+            detected_at: Utc::now(),
+            scheduled_at: None,
+            send_after: None,
+            notification_comment_id: None,
+            stop_comment_id: None,
+            stopped_by: None,
+            stopped_at: None,
+            wallet_login: None,
+            wallet_address: None,
+            last_wallet_check_at: None,
+            wallet_checks: 0,
+            processed_at: None,
+            transaction_ref: None,
+            last_error: None,
+        };
+
+        let record2 = AppreciationRecord {
+            repository: "owner/repo1".into(),
+            pr_number: 2,
+            pr_title: "PR 2".into(),
+            pr_author: "bob".into(),
+            state: AppreciationState::ScheduledForSending,
+            detected_at: Utc::now(),
+            scheduled_at: Some(Utc::now()),
+            send_after: None,
+            notification_comment_id: Some(123),
+            stop_comment_id: None,
+            stopped_by: None,
+            stopped_at: None,
+            wallet_login: None,
+            wallet_address: None,
+            last_wallet_check_at: None,
+            wallet_checks: 0,
+            processed_at: None,
+            transaction_ref: None,
+            last_error: None,
+        };
+
+        let record3 = AppreciationRecord {
+            repository: "owner/repo2".into(),
+            pr_number: 1,
+            pr_title: "PR 1 in repo2".into(),
+            pr_author: "charlie".into(),
+            state: AppreciationState::Registered,
+            detected_at: Utc::now(),
+            scheduled_at: None,
+            send_after: None,
+            notification_comment_id: None,
+            stop_comment_id: None,
+            stopped_by: None,
+            stopped_at: None,
+            wallet_login: None,
+            wallet_address: None,
+            last_wallet_check_at: None,
+            wallet_checks: 0,
+            processed_at: None,
+            transaction_ref: None,
+            last_error: None,
+        };
+
+        db.upsert_appreciation(&record1).unwrap();
+        db.upsert_appreciation(&record2).unwrap();
+        db.upsert_appreciation(&record3).unwrap();
+
+        // Query repo1 - should get 2 records
+        let repo1_appreciations = db.list_appreciations_for_repo("owner/repo1").unwrap();
+        assert_eq!(repo1_appreciations.len(), 2);
+        let authors: Vec<_> = repo1_appreciations
+            .iter()
+            .map(|a| a.pr_author.as_str())
+            .collect();
+        assert!(authors.contains(&"alice"));
+        assert!(authors.contains(&"bob"));
+
+        // Query repo2 - should get 1 record
+        let repo2_appreciations = db.list_appreciations_for_repo("owner/repo2").unwrap();
+        assert_eq!(repo2_appreciations.len(), 1);
+        assert_eq!(repo2_appreciations[0].pr_author, "charlie");
+
+        // List all appreciations - should get 3
+        let all_appreciations = db.list_appreciations().unwrap();
+        assert_eq!(all_appreciations.len(), 3);
+    }
+
+    #[test]
+    fn appreciation_idempotent_upsert() {
+        use crate::types::{AppreciationRecord, AppreciationState};
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path().to_str().unwrap()).unwrap();
+
+        let mut record = AppreciationRecord {
+            repository: "owner/repo".into(),
+            pr_number: 99,
+            pr_title: "Initial title".into(),
+            pr_author: "alice".into(),
+            state: AppreciationState::Registered,
+            detected_at: Utc::now(),
+            scheduled_at: None,
+            send_after: None,
+            notification_comment_id: None,
+            stop_comment_id: None,
+            stopped_by: None,
+            stopped_at: None,
+            wallet_login: None,
+            wallet_address: None,
+            last_wallet_check_at: None,
+            wallet_checks: 0,
+            processed_at: None,
+            transaction_ref: None,
+            last_error: None,
+        };
+
+        // Insert initial record
+        db.upsert_appreciation(&record).unwrap();
+
+        // Update and upsert again
+        record.state = AppreciationState::ScheduledForSending;
+        record.pr_title = "Updated title".into();
+        record.notification_comment_id = Some(456);
+        db.upsert_appreciation(&record).unwrap();
+
+        // Verify update worked
+        let fetched = db
+            .get_appreciation("owner/repo", 99)
+            .unwrap()
+            .expect("should exist");
+
+        assert_eq!(fetched.pr_title, "Updated title");
+        assert_eq!(fetched.state, AppreciationState::ScheduledForSending);
+        assert_eq!(fetched.notification_comment_id, Some(456));
+
+        // Verify we still have only one record
+        let all = db.list_appreciations().unwrap();
+        assert_eq!(all.len(), 1);
+    }
 }

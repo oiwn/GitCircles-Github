@@ -357,4 +357,29 @@ mod tests {
         assert!(parse_repo(valid_repo).is_ok());
         assert!(parse_repo(invalid_no_slash).is_err());
     }
+
+    #[test]
+    fn appreciation_state_serialization() {
+        use crate::types::AppreciationState;
+
+        // Verify each state serializes to lowercase snake_case
+        let cases = vec![
+            (AppreciationState::Registered, "registered"),
+            (AppreciationState::ScheduledForSending, "scheduled_for_sending"),
+            (AppreciationState::WaitingForWallet, "waiting_for_wallet"),
+            (AppreciationState::AppreciationStopped, "appreciation_stopped"),
+            (AppreciationState::StoppedByAuthor, "stopped_by_author"),
+            (AppreciationState::ProcessedWithoutStop, "processed_without_stop"),
+        ];
+
+        for (state, expected_json) in cases {
+            let serialized = serde_json::to_string(&state).unwrap();
+            assert_eq!(serialized, format!("\"{}\"", expected_json));
+
+            // Verify deserialization works too
+            let deserialized: AppreciationState =
+                serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, state);
+        }
+    }
 }
